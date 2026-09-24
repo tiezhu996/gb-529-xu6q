@@ -70,6 +70,11 @@ func (r *TransferRepository) Get(ctx context.Context, id uint) (model.TransferOp
 
 func (r *TransferRepository) Create(ctx context.Context, item *model.TransferOperation, actor Actor) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if freeze, frozen, err := ActiveFreezeOverlapRange(tx, item.TankID, item.StartAt, item.EndAt); err != nil {
+			return err
+		} else if frozen {
+			return FreezeBlockedError("transfer_create", freeze)
+		}
 		var overlaps int64
 		if err := tx.Model(&model.TransferOperation{}).
 			Where("tank_id = ? AND operation_status <> ? AND start_at < ? AND end_at > ?", item.TankID, "cancelled", item.EndAt, item.StartAt).
@@ -102,6 +107,11 @@ func (r *TransferRepository) Transition(ctx context.Context, id, version uint, t
 		}
 		if before.Version != version {
 			return api.NewError(409, "TRANSFER_VERSION_CONFLICT", "物理转移记录版本已变化，请刷新后重试")
+		}
+		if freeze, frozen, err := ActiveFreezeOverlapRange(tx, before.TankID, before.StartAt, before.EndAt); err != nil {
+			return err
+		} else if frozen {
+			return FreezeBlockedError("transfer_status", freeze)
 		}
 		allowed := before.OperationStatus == "draft" && (target == "confirmed" || target == "cancelled")
 		allowed = allowed || (before.OperationStatus == "confirmed" && target == "cancelled")

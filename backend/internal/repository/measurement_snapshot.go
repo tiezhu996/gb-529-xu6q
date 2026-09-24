@@ -69,6 +69,11 @@ func (r *MeasurementRepository) Get(ctx context.Context, id uint) (model.Measure
 
 func (r *MeasurementRepository) Create(ctx context.Context, snapshot *model.MeasurementSnapshot, actor Actor) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if freeze, frozen, err := ActiveFreezeAtPoint(tx, snapshot.TankID, snapshot.MeasuredAt); err != nil {
+			return err
+		} else if frozen {
+			return FreezeBlockedError("measurement_create", freeze)
+		}
 		var existing int64
 		if err := tx.Model(&model.MeasurementSnapshot{}).
 			Where("tank_id = ? AND measured_at = ?", snapshot.TankID, snapshot.MeasuredAt).

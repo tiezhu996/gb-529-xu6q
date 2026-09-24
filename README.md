@@ -24,8 +24,8 @@ docker compose ps
 
 | 角色 | 邮箱 | 权限 |
 | --- | --- | --- |
-| 工艺分析员 | `analyst@lng.local` | 储罐、快照和转移维护，运行平衡并提交复核 |
-| 独立复核员 | `reviewer@lng.local` | 查询证据、接受或驳回待复核运行、查看审计 |
+| 工艺分析员 | `analyst@lng.local` | 储罐、快照和转移维护，运行平衡并提交复核，登记期间冻结 |
+| 独立复核员 | `reviewer@lng.local` | 查询证据、接受或驳回待复核运行，通过/驳回冻结与带原因解除、查看审计 |
 | 管理员 | `admin@lng.local` | 全部权限，并可作废非终态运行 |
 
 停止并删除本项目专用数据卷：
@@ -42,7 +42,8 @@ docker compose ps
 - 物理转移：记录实际流入/流出、时间段、计量质量和物理参考；同一储罐的未取消时间段不得重叠。
 - 平衡运行：选择期初和期末有效快照，汇总期间已确认转移，保存完整输入、系数版本、方程和不确定度证据。
 - 独立复核：`queued -> calculating -> pending_review -> accepted | rejected | invalidated`，接受/驳回只允许复核员或管理员。
-- 审计追踪：参数、快照、转移、运行、提交和复核均保存 request ID、操作者及前后摘要。
+- 期间冻结：分析员按储罐登记冻结期间（起止时间+说明），同一储罐未终结期间不得重叠；`pending_review -> active | rejected -> released`。复核员通过后，期内新增快照、新增转移以及确认/取消既有期内转移都会被挡下并回报冻结记录编号；原数据与既有平衡结果始终只读可查。复核员或管理员可带原因解除冻结，登记人、复核人、解除人及各自时间、状态全程可查。
+- 审计追踪：参数、快照、转移、运行、冻结、提交和复核均保存 request ID、操作者及前后摘要。
 - 横切能力：JWT、RBAC、全局错误、结构化访问日志、request ID、panic recovery、本地令牌桶限流和优雅停机。
 
 ## 计算方法与单位
@@ -87,11 +88,11 @@ docker compose ps
 │   └── pkg/api/                    # 统一响应和错误模型
 ├── frontend/src/
 │   ├── api/                        # 按实体拆分的真实 API 客户端
-│   ├── stores/                     # 认证与四个领域 Zustand store
+│   ├── stores/                     # 认证与五个领域 Zustand store
 │   ├── types/                      # 前后端一致的领域类型
 │   ├── components/common/          # 质量徽标、瀑布图、证据面板
 │   ├── hooks/                      # useAuth、useBalanceRun
-│   ├── pages/                      # 储罐、计量、转移、平衡、审计
+│   ├── pages/                      # 储罐、计量、转移、平衡、冻结、审计
 │   ├── router/                     # JWT/RBAC 路由守卫
 │   └── utils/                      # 单位、数字和时间格式
 ├── docker-compose.yml
@@ -121,6 +122,10 @@ docker compose ps
 | `POST` | `/api/v1/balances/:id/review` | 接受或驳回 |
 | `POST` | `/api/v1/balances/:id/invalidate` | 管理员作废 |
 | `GET` | `/api/v1/balances/:id/uncertainty` | 不确定度分解 |
+| `GET/POST` | `/api/v1/freezes` | 储罐期间冻结记录列表与登记（待复核） |
+| `GET` | `/api/v1/freezes/:id` | 冻结记录详情（含各环节操作者与时间） |
+| `POST` | `/api/v1/freezes/:id/review` | 复核员通过/驳回冻结申请 |
+| `POST` | `/api/v1/freezes/:id/release` | 复核员/管理员带原因解除冻结 |
 | `GET` | `/api/v1/audits` | 复核员/管理员查询审计 |
 
 ## 共享枚举出现位置
@@ -136,6 +141,13 @@ docker compose ps
 - 数据库/model：`backend/internal/model/balance_run.go`
 - 后端常量、算法与 service：`backend/internal/constants/deviation.go`、`backend/internal/balance/uncertainty.go`、`backend/internal/service/balance_run.go`
 - 前端类型、共享组件和页面：`frontend/src/types/deviation.ts`、`frontend/src/types/balance.ts`、`frontend/src/components/common/EvidenceBreakdownPanel.tsx`、`frontend/src/components/common/MassBalanceWaterfall.tsx`、`frontend/src/pages/BalancesPage.tsx`
+
+`FreezeStatus = pending_review | active | rejected | released`：
+
+- 数据库/model：`backend/internal/model/period_freeze.go`
+- 后端常量、DTO、repository、service、handler、router：`backend/internal/constants/freeze.go`、`backend/internal/dto/period_freeze.go`、`backend/internal/repository/period_freeze.go`、`backend/internal/service/period_freeze.go`、`backend/internal/handler/period_freeze.go`、`backend/internal/router/router.go`
+- 冻结阻断点（事务内执行）：`backend/internal/repository/measurement_snapshot.go`（期内新增快照）、`backend/internal/repository/transfer_operation.go`（新增、确认与取消转移）
+- 前端类型、API、store 和页面：`frontend/src/types/freeze.ts`、`frontend/src/api/freezes.ts`、`frontend/src/stores/freezeStore.ts`、`frontend/src/pages/FreezesPage.tsx`
 
 ## 环境变量与端口
 
@@ -190,6 +202,9 @@ node scripts/api-smoke.mjs
 - `OPENING_SNAPSHOT_MISSING`：期间开始时点前没有 `good` 或 `suspect` 快照。
 - `CLOSING_SNAPSHOT_MISSING`：期间内没有晚于期初的有效期末快照。
 - `TRANSFER_TIME_OVERLAP`：同一储罐已有时间重叠且未取消的物理转移。
+- `FREEZE_PERIOD_OVERLAP`：同一储罐已有时间重叠且处于待复核或冻结中的冻结记录，端点相接的相邻期间允许登记。
+- `PERIOD_FROZEN`：目标时间点/时间段处于已冻结期间，期内新增快照、新增转移或确认/取消期内转移被阻止；`details.freeze_id` 与提示文案给出冻结记录编号，可到“期间冻结”页查询。
+- `FREEZE_VERSION_CONFLICT` / `INVALID_FREEZE_TRANSITION`：冻结记录版本或状态已变化，刷新后重试；驳回需填写复核说明，解除需填写不少于 6 个字符的原因。
 - `TANK_VERSION_CONFLICT` / `BALANCE_VERSION_CONFLICT`：数据被其他请求更新，刷新后使用新版本重试。
 - 后端未 healthy：运行 `docker compose logs backend`，检查 JWT、数据库配置和 PostgreSQL 健康状态。
 - 前端 API 失败：确认 Nginx 的 `/api/` 使用无尾斜杠的 `proxy_pass http://backend:8080`，避免剥离 `/api`。

@@ -107,6 +107,7 @@ func migrate(db *gorm.DB) error {
 		&model.MeasurementSnapshot{},
 		&model.TransferOperation{},
 		&model.BalanceRun{},
+		&model.PeriodFreeze{},
 		&model.AuditEvent{},
 	)
 }
