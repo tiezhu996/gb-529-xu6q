@@ -7,7 +7,8 @@ export class ApiError extends Error {
     message: string,
     public readonly status: number,
     public readonly code: string,
-    public readonly requestId?: string
+    public readonly requestId?: string,
+    public readonly details?: Record<string, unknown>
   ) {
     super(message)
   }
@@ -29,17 +30,18 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
   }
   const payload = (await response.json().catch(() => ({}))) as ApiEnvelope<T> & ApiFailure
   if (!response.ok) {
-    const error = new ApiError(
-      payload.error?.message ?? `请求失败 (${response.status})`,
-      response.status,
-      payload.error?.code ?? 'REQUEST_FAILED',
-      payload.request_id
-    )
+    const code = payload.error?.code ?? 'REQUEST_FAILED'
+    const message = payload.error?.message ?? `请求失败 (${response.status})`
+    const details = payload.error?.details as Record<string, unknown> | undefined
+    const shown = code === 'PERIOD_FROZEN' && details?.freeze_id
+      ? `${message}（冻结记录编号 #${String(details.freeze_id)}）`
+      : message
+    const error = new ApiError(shown, response.status, code, payload.request_id, details)
     if (response.status === 401 && path !== '/auth/login') {
       sessionStorage.removeItem(tokenKey)
       window.dispatchEvent(new Event('auth:expired'))
     }
-    window.dispatchEvent(new CustomEvent('api:error', { detail: error.message + (error.requestId ? ' · ' + error.requestId : '') }))
+    window.dispatchEvent(new CustomEvent('api:error', { detail: shown + (error.requestId ? ' · ' + error.requestId : '') }))
     throw error
   }
   return payload.data

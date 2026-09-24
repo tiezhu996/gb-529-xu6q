@@ -19,6 +19,7 @@ type Handlers struct {
 	Measurement *handler.MeasurementHandler
 	Transfer    *handler.TransferHandler
 	Balance     *handler.BalanceHandler
+	Freeze      *handler.FreezeHandler
 }
 
 func New(log *slog.Logger, authService *service.AuthService, handlers Handlers, corsOrigins []string) *gin.Engine {
@@ -63,6 +64,13 @@ func New(log *slog.Logger, authService *service.AuthService, handlers Handlers, 
 	protected.POST("/balances/:id/submit", middleware.RBAC(constants.RoleProcessAnalyst, constants.RoleAdmin), handlers.Balance.Submit)
 	protected.POST("/balances/:id/review", middleware.RBAC(constants.RoleReviewer, constants.RoleAdmin), handlers.Balance.Review)
 	protected.POST("/balances/:id/invalidate", middleware.RBAC(constants.RoleAdmin), handlers.Balance.Invalidate)
+
+	protected.GET("/period-freezes", handlers.Freeze.List)
+	protected.GET("/period-freezes/:id", handlers.Freeze.Get)
+	protected.POST("/period-freezes", middleware.RBAC(constants.RoleProcessAnalyst, constants.RoleAdmin), handlers.Freeze.Create)
+	protected.POST("/period-freezes/:id/approve", middleware.RBAC(constants.RoleReviewer, constants.RoleAdmin), handlers.Freeze.Approve)
+	protected.POST("/period-freezes/:id/reject", middleware.RBAC(constants.RoleReviewer, constants.RoleAdmin), handlers.Freeze.Reject)
+	protected.POST("/period-freezes/:id/release", middleware.RBAC(constants.RoleReviewer, constants.RoleAdmin), handlers.Freeze.Release)
 
 	protected.GET("/audits", middleware.RBAC(constants.RoleReviewer, constants.RoleAdmin), handlers.Support.ListAudits)
 	return engine

@@ -121,7 +121,14 @@ docker compose ps
 | `POST` | `/api/v1/balances/:id/review` | 接受或驳回 |
 | `POST` | `/api/v1/balances/:id/invalidate` | 管理员作废 |
 | `GET` | `/api/v1/balances/:id/uncertainty` | 不确定度分解 |
+| `GET/POST` | `/api/v1/period-freezes` | 储罐期间冻结记录与申请（分析员/管理员） |
+| `GET` | `/api/v1/period-freezes/:id` | 冻结记录详情 |
+| `POST` | `/api/v1/period-freezes/:id/approve` | 复核员通过冻结，期间立即锁定 |
+| `POST` | `/api/v1/period-freezes/:id/reject` | 复核员驳回冻结申请（需说明） |
+| `POST` | `/api/v1/period-freezes/:id/release` | 复核员/管理员带原因解除冻结 |
 | `GET` | `/api/v1/audits` | 复核员/管理员查询审计 |
+
+冻结生效期间，期内新增计量快照、新增/确认/取消物理转移返回 `423 PERIOD_FROZEN`，错误 `details` 携带 `freeze_id`、`tank_id` 与被拦动作；原数据与既有平衡结果不受影响、保持可查。
 
 ## 共享枚举出现位置
 

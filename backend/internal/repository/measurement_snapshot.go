@@ -78,6 +78,9 @@ func (r *MeasurementRepository) Create(ctx context.Context, snapshot *model.Meas
 		if existing > 0 {
 			return api.NewError(409, "MEASUREMENT_DUPLICATE", "该储罐在相同时间已存在计量快照")
 		}
+		if err := ensureNotFrozen(tx, "measurement_snapshot.create", snapshot.TankID, snapshot.MeasuredAt); err != nil {
+			return err
+		}
 		if err := tx.Create(snapshot).Error; err != nil {
 			return fmt.Errorf("create immutable measurement snapshot: %w", err)
 		}

@@ -35,6 +35,7 @@ func main() {
 	measurementRepo := repository.NewMeasurementRepository(db)
 	transferRepo := repository.NewTransferRepository(db)
 	balanceRepo := repository.NewBalanceRepository(db)
+	freezeRepo := repository.NewFreezeRepository(db)
 	supportRepo := repository.NewSupportRepository(db)
 
 	authService := service.NewAuthService(supportRepo, cfg.JWTSecret)
@@ -42,6 +43,7 @@ func main() {
 	measurementService := service.NewMeasurementService(measurementRepo, tankRepo)
 	transferService := service.NewTransferService(transferRepo, tankRepo)
 	balanceService := service.NewBalanceService(balanceRepo, tankRepo, measurementRepo, transferRepo)
+	freezeService := service.NewFreezeService(freezeRepo, tankRepo)
 	auditService := service.NewAuditService(supportRepo)
 
 	handlers := router.Handlers{
@@ -50,6 +52,7 @@ func main() {
 		Measurement: handler.NewMeasurementHandler(measurementService),
 		Transfer:    handler.NewTransferHandler(transferService),
 		Balance:     handler.NewBalanceHandler(balanceService),
+		Freeze:      handler.NewFreezeHandler(freezeService),
 	}
 	engine := router.New(log, authService, handlers, cfg.CORSOrigins)
 	server := &http.Server{

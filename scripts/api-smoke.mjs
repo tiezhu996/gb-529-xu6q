@@ -257,6 +257,117 @@ async function main() {
   );
   if (rejected.data.balance_status !== "rejected") fail("review was not rejected", rejected);
 
+  // ---- 储罐期间冻结：申请、重叠校验、复核通过、期内拦截、解除 ----
+  const freezeBody = {
+    tank_id: tankID,
+    period_start: periodStart,
+    period_end: periodEnd,
+    freeze_note: "平衡已送审接受，冻结期间防止现场补录改变复核依据",
+  };
+  const freeze = await api("analyst creates period freeze", proxy, "/api/v1/period-freezes", {
+    method: "POST", token: analyst, status: 201, body: freezeBody,
+  });
+  if (freeze.data.freeze_status !== "pending_approval") fail("new freeze must be pending_approval", freeze);
+  const freezeID = freeze.data.id;
+
+  await api("overlapping freeze rejected", proxy, "/api/v1/period-freezes", {
+    method: "POST", token: analyst, status: 409, errorCode: "FREEZE_PERIOD_OVERLAP",
+    body: { ...freezeBody, period_start: "2026-07-01T12:00:00Z", period_end: "2026-07-02T12:00:00Z" },
+  });
+  await api("reviewer cannot create freeze", proxy, "/api/v1/period-freezes", {
+    method: "POST", token: reviewer, status: 403, errorCode: "ACCESS_DENIED",
+    body: freezeBody,
+  });
+
+  // 生效前先准备一条期内草稿转移，用于验证确认/取消均被挡下
+  const draftTransfer = await api("draft transfer before approval", proxy, "/api/v1/transfers", {
+    method: "POST", token: analyst, status: 201,
+    body: {
+      ...transfer,
+      operation_type: "inflow",
+      operation_status: "draft",
+      start_at: "2026-07-01T08:00:00Z",
+      end_at: "2026-07-01T09:00:00Z",
+      measured_mass_kg: 12000,
+      counterparty_ref: "API-FREEZE-DRAFT",
+    },
+  });
+
+  const approvedFreeze = await api("reviewer approves freeze", proxy, `/api/v1/period-freezes/${freezeID}/approve`, {
+    method: "POST", token: reviewer, body: { version: freeze.data.version, decision_note: "复核依据固定，同意冻结" },
+  });
+  if (approvedFreeze.data.freeze_status !== "active" || !approvedFreeze.data.decided_at) {
+    fail("freeze approval did not activate the record", approvedFreeze);
+  }
+  await api("approve again rejected", proxy, `/api/v1/period-freezes/${freezeID}/approve`, {
+    method: "POST", token: reviewer, status: 409, errorCode: "FREEZE_NOT_PENDING",
+    body: { version: approvedFreeze.data.version },
+  });
+
+  const blockedSnapshot = await api("snapshot inside freeze blocked", proxy, "/api/v1/measurements", {
+    method: "POST", token: analyst, status: 423, errorCode: "PERIOD_FROZEN",
+    body: {
+      ...measurement,
+      measured_at: "2026-07-01T12:30:00Z",
+      liquid_level_m: 9.9,
+      source_note: "retroactive snapshot after freeze",
+    },
+  });
+  if (blockedSnapshot.error.details.freeze_id !== freezeID) {
+    fail("blocked response must report the freeze record id", blockedSnapshot);
+  }
+  await api("snapshot outside freeze allowed", proxy, "/api/v1/measurements", {
+    method: "POST", token: analyst, status: 201,
+    body: {
+      ...measurement,
+      measured_at: "2026-07-03T00:30:00Z",
+      liquid_level_m: 9.9,
+      source_note: "outside frozen period snapshot",
+    },
+  });
+  await api("transfer inside freeze blocked", proxy, "/api/v1/transfers", {
+    method: "POST", token: analyst, status: 423, errorCode: "PERIOD_FROZEN",
+    body: {
+      ...transfer,
+      operation_type: "outflow",
+      start_at: "2026-07-01T10:00:00Z",
+      end_at: "2026-07-01T11:00:00Z",
+      measured_mass_kg: 20000,
+      counterparty_ref: "API-FROZEN-TRANSFER",
+    },
+  });
+  await api("confirm inside freeze blocked", proxy, `/api/v1/transfers/${draftTransfer.data.id}/status`, {
+    method: "POST", token: analyst, status: 423, errorCode: "PERIOD_FROZEN",
+    body: { version: draftTransfer.data.version, target_status: "confirmed" },
+  });
+  await api("cancel inside freeze blocked", proxy, `/api/v1/transfers/${draftTransfer.data.id}/status`, {
+    method: "POST", token: analyst, status: 423, errorCode: "PERIOD_FROZEN",
+    body: { version: draftTransfer.data.version, target_status: "cancelled", reason: "attempt after freeze" },
+  });
+  await api("analyst cannot release freeze", proxy, `/api/v1/period-freezes/${freezeID}/release`, {
+    method: "POST", token: analyst, status: 403, errorCode: "ACCESS_DENIED",
+    body: { version: approvedFreeze.data.version, release_reason: "analyst attempt" },
+  });
+  await api("release without reason rejected", proxy, `/api/v1/period-freezes/${freezeID}/release`, {
+    method: "POST", token: reviewer, status: 400,
+    body: { version: approvedFreeze.data.version, release_reason: "x" },
+  });
+
+  const released = await api("reviewer releases freeze with reason", proxy, `/api/v1/period-freezes/${freezeID}/release`, {
+    method: "POST", token: reviewer,
+    body: { version: approvedFreeze.data.version, release_reason: "现场补录已核对完毕，解除冻结" },
+  });
+  if (released.data.freeze_status !== "released" || !released.data.released_at || released.data.released_by === null) {
+    fail("release did not record operator and timestamp", released);
+  }
+  await api("confirm after release allowed", proxy, `/api/v1/transfers/${draftTransfer.data.id}/status`, {
+    method: "POST", token: analyst,
+    body: { version: draftTransfer.data.version, target_status: "confirmed" },
+  });
+  await api("freeze list filter", proxy, `/api/v1/period-freezes?tank_id=${tankID}&status=released`, {
+    token: reviewer,
+  });
+
   const balances = await api("tank balances", proxy, `/api/v1/balances?tank_id=${tankID}`, {
     token: reviewer,
   });

@@ -79,6 +79,9 @@ func (r *TransferRepository) Create(ctx context.Context, item *model.TransferOpe
 		if overlaps > 0 {
 			return api.NewError(409, "TRANSFER_TIME_OVERLAP", "该储罐已有时间重叠的未取消物理转移")
 		}
+		if err := ensureRangeNotFrozen(tx, "transfer_operation.create", item.TankID, item.StartAt, item.EndAt); err != nil {
+			return err
+		}
 		if err := tx.Create(item).Error; err != nil {
 			return fmt.Errorf("create transfer operation: %w", err)
 		}
@@ -109,6 +112,9 @@ func (r *TransferRepository) Transition(ctx context.Context, id, version uint, t
 			return api.WithDetails(api.NewError(409, "INVALID_TRANSFER_TRANSITION", "当前转移状态不允许目标迁移"), map[string]any{
 				"current": before.OperationStatus, "target": target,
 			})
+		}
+		if err := ensureRangeNotFrozen(tx, "transfer_operation."+target, before.TankID, before.StartAt, before.EndAt); err != nil {
+			return err
 		}
 		result := tx.Model(&model.TransferOperation{}).
 			Where("id = ? AND version = ? AND operation_status = ?", id, version, before.OperationStatus).

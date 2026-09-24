@@ -1,10 +1,11 @@
 import { useEffect, type ReactNode } from 'react'
 import { Button, Result, Spin, Tooltip } from 'antd'
-import { ArrowLeftRight, Database, FileClock, LogOut, Scale, Snowflake, Thermometer } from 'lucide-react'
+import { ArrowLeftRight, Database, FileClock, Lock, LogOut, Scale, Snowflake, Thermometer } from 'lucide-react'
 import { NavLink, Navigate, Outlet, createBrowserRouter, useLocation } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { AuditPage } from '../pages/AuditPage'
 import { BalancesPage } from '../pages/BalancesPage'
+import { FreezesPage } from '../pages/FreezesPage'
 import { LoginPage } from '../pages/LoginPage'
 import { MeasurementsPage } from '../pages/MeasurementsPage'
 import { TanksPage } from '../pages/TanksPage'
@@ -36,6 +37,7 @@ function WorkspaceLayout() {
     { to: '/measurements', label: '计量', icon: Thermometer },
     { to: '/transfers', label: '转移', icon: ArrowLeftRight },
     { to: '/balances', label: '平衡', icon: Scale },
+    { to: '/freezes', label: '冻结', icon: Lock },
     ...(user?.role === 'reviewer' || user?.role === 'admin' ? [{ to: '/audit', label: '审计', icon: FileClock }] : [])
   ]
   return (
@@ -79,6 +81,7 @@ export const router = createBrowserRouter([
       { path: 'measurements', element: <MeasurementsPage /> },
       { path: 'transfers', element: <TransfersPage /> },
       { path: 'balances', element: <BalancesPage /> },
+      { path: 'freezes', element: <FreezesPage /> },
       { path: 'audit', element: <Protected roles={['reviewer', 'admin']}><AuditPage /></Protected> }
     ]
   },
